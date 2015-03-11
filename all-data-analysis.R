@@ -33,10 +33,68 @@ coordConvert <- function(lat1, long1, lat2, long2){
 
 #+++++++++++++++++++++++++++START SCRIPT+++++++++++++++++++++++++++++++++#
 
-#STEP 1: Import required data into a set of dataframes.
+#STEP 1: Import required data into an sql database
 
 #create list of file names
 csvFiles = list.files(pattern="*.csv")
 
+#Initialise DB connection
+#Use 1 if this is your first time setting up the databse.
+#Use 2 if you're reconnecting to the database
 
+#1.
+#mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost')
 
+#dbSendQuery(mydb, "CREATE DATABASE DublinBus;")
+#dbSendQuery(mydb, "USE DublinBus")
+
+#dbSendQuery(mydb, "drop table if exists Table1")
+
+#2.
+mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost')
+
+#Read csv data into data frame and name accordingly
+raw01 <- read.csv("siri.20130101.csv",header=FALSE)
+names = c("Timestamp", "LineID", "Direction", "JourneyPatternID",
+          "TimeFrame", "VehicleJourneyID", "Operator", "Congestion",
+          "LonWGS84", "LatWGS84", "Delay", "BlockID", "VehicleID", 
+          "StopID", "AtStop" )
+names(raw01) <- names
+
+raw01$Direction <- NULL #redundant
+
+train01 <-raw01
+
+#Some basic cleanup...
+train01$Operator <- NULL #Not interested in bus operator
+train01[train01=="null"]=NA#replace data "nulls" with NA's
+# creating tables for bus data storage:
+
+dbSendQuery(mydb, "
+  CREATE TABLE Table1 (
+  TimestampID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  Timestamp BIGINT UNSIGNED,
+  LineID SMALLINT UNSIGNED,
+  JourneyPatternID VARCHAR(8),
+  TimeFrame DATE,
+  VehicleJourneyID INT UNSIGNED,
+  Congestion BOOL,
+  LonWGS84 NUMERIC(7,6),
+  LatWGS84 NUMERIC(7,6),
+  Delay INT,
+  BlockID INT UNSIGNED,
+  VehicleID INT UNSIGNED,
+  StopID INT UNSIGNED,
+  AtStop BOOL,
+  PRIMARY KEY (TimestampID)
+  );
+")
+
+#Check table exists
+dbListTables(mydb)
+#check columns look right
+dbGetQuery(mydb, "
+select * from information_schema.columns
+where table_schema = 'dublinbus'
+order by table_name,ordinal_position
+")
