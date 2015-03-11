@@ -27,5 +27,6 @@
 *.out
 *.app
 
-# R and Data Files
+# Data files
 *.csv
+*.csv#
