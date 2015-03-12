@@ -31,6 +31,42 @@ coordConvert <- function(lat1, long1, lat2, long2){
   return(distance*1000)
 }
 
+#Extension to dbGetQuery2 that understands MySQL data types
+dbGetQuery2 <- function(con,query){
+  statement <- paste0("CREATE TEMPORARY TABLE `temp` ", query)
+  dbSendQuery(con, statement)
+  desc <- dbGetQuery(con, "DESCRIBE `temp`")[,1:2]
+  dbSendQuery(con, "DROP TABLE `temp`")
+  
+  # strip row_names if exists because it's an attribute and not real column
+  # otherweise it causes problems with the row count if the table has a row_names col
+  if(length(grep(pattern="row_names",x=desc)) != 0){
+    x <- grep(pattern="row_names",x=desc)
+    desc <- desc[-x,]
+  }
+  
+  # replace length output in brackets that is returned by describe
+  desc[,2] <- gsub("[^a-z]","",desc[,2])
+  
+  # building a dictionary 
+  fieldtypes <- c("int",        "tinyint",    "bigint",     "float",      "double",     "date",    "character",    "varchar",   "text")
+  rclasses <-   c("as.numeric", "as.numeric", "as.numeric", "as.numeric", "as.numeric", "as.Date", "as.character", "as.factor", "as.character") 
+  fieldtype_to_rclass = cbind(fieldtypes,rclasses)
+  
+  map <- merge(fieldtype_to_rclass,desc,by.x="fieldtypes",by.y="Type")
+  map$rclasses <- as.character(map$rclasses)
+  #get data
+  res <- dbGetQuery(con,query)
+  
+  i=1
+  for(i in 1:length(map$rclasses)) {
+    cvn <- call(map$rclasses[i],res[,map$Field[i]])
+    res[map$Field[i]] <- eval(cvn)
+  }
+  
+  return(res)
+}
+
 #+++++++++++++++++++++++++++START SCRIPT+++++++++++++++++++++++++++++++++#
 
 #STEP 1: Import required data into an sql database
@@ -43,7 +79,7 @@ csvFiles = list.files(pattern="*.csv")
 #Use 2 if you're reconnecting to the database
 
 #1.
-#mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost')
+#mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost', dbname="dublinbus")
 
 #dbSendQuery(mydb, "CREATE DATABASE DublinBus;")
 #dbSendQuery(mydb, "USE DublinBus")
@@ -51,7 +87,7 @@ csvFiles = list.files(pattern="*.csv")
 #dbSendQuery(mydb, "drop table if exists Table1")
 
 #2.
-mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost')
+mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost',dbname="dublinbus")
 
 #Read csv data into data frame and name accordingly
 raw01 <- read.csv("siri.20130101.csv",header=FALSE)
@@ -68,7 +104,12 @@ train01 <-raw01
 #Some basic cleanup...
 train01$Operator <- NULL #Not interested in bus operator
 train01[train01=="null"]=NA#replace data "nulls" with NA's
+train01$TimeFrame <- as.character(train01$TimeFrame) #convert from factor to char
+train01$StopID <- as.integer(as.character(train01$StopID))
+
 # creating tables for bus data storage:
+
+dbGetQuery(mydb, "DROP TABLE table1")
 
 dbSendQuery(mydb, "
   CREATE TABLE Table1 (
@@ -76,11 +117,11 @@ dbSendQuery(mydb, "
   Timestamp BIGINT UNSIGNED,
   LineID SMALLINT UNSIGNED,
   JourneyPatternID VARCHAR(8),
-  TimeFrame DATE,
+  TimeFrame VARCHAR (15),
   VehicleJourneyID INT UNSIGNED,
   Congestion BOOL,
-  LonWGS84 NUMERIC(7,6),
-  LatWGS84 NUMERIC(7,6),
+  LonWGS84 NUMERIC(10,8),
+  LatWGS84 NUMERIC(10,8),
   Delay INT,
   BlockID INT UNSIGNED,
   VehicleID INT UNSIGNED,
@@ -98,3 +139,13 @@ select * from information_schema.columns
 where table_schema = 'dublinbus'
 order by table_name,ordinal_position
 ")
+# Using paste to create a query, displying it and throwing it at MYSQL
+query <- paste("INSERT INTO table1 VALUES(",1,",", paste(train01[1,], collapse = ", "), ")")
+query
+dbGetQuery(mydb,query)
+
+#Verifying output
+dbGetQuery(mydb,"SELECT * FROM table1;")
+#NB: Currently MYSQL is out
+
+#Now let's loop through the full table and add all the data
