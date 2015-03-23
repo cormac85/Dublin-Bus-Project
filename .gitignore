@@ -30,6 +30,7 @@
 # Data files
 *.csv
 *.csv#
+*.RData
 
 #Documentation & other files
 *.gsheet
