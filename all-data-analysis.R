@@ -11,6 +11,7 @@ rm(list=ls())
 setwd("C:/Users/King Mac/Google Drive/Coding/DIT/5. Project/siri.20130131.csv")
 
 #FUNCTIONS GO HERE!
+
 #converts the timestamp into a date time POSIXct object
 dtConvert <- function(timestamp){
   return(as.POSIXct(timestamp/1000000, origin="1970-01-01"))
@@ -29,42 +30,6 @@ coordConvert <- function(lat1, long1, lat2, long2){
   
   distance=acos(sin(lat1)*sin(lat2)+cos(lat1)*cos(lat2)*cos(long2-long1))*radius
   return(distance*1000)
-}
-
-#Extension to dbGetQuery2 that understands MySQL data types
-dbGetQuery2 <- function(con,query){
-  statement <- paste0("CREATE TEMPORARY TABLE `temp` ", query)
-  dbSendQuery(con, statement)
-  desc <- dbGetQuery(con, "DESCRIBE `temp`")[,1:2]
-  dbSendQuery(con, "DROP TABLE `temp`")
-  
-  # strip row_names if exists because it's an attribute and not real column
-  # otherweise it causes problems with the row count if the table has a row_names col
-  if(length(grep(pattern="row_names",x=desc)) != 0){
-    x <- grep(pattern="row_names",x=desc)
-    desc <- desc[-x,]
-  }
-  
-  # replace length output in brackets that is returned by describe
-  desc[,2] <- gsub("[^a-z]","",desc[,2])
-  
-  # building a dictionary 
-  fieldtypes <- c("int",        "tinyint",    "bigint",     "float",      "double",     "date",    "character",    "varchar",   "text")
-  rclasses <-   c("as.numeric", "as.numeric", "as.numeric", "as.numeric", "as.numeric", "as.Date", "as.character", "as.factor", "as.character") 
-  fieldtype_to_rclass = cbind(fieldtypes,rclasses)
-  
-  map <- merge(fieldtype_to_rclass,desc,by.x="fieldtypes",by.y="Type")
-  map$rclasses <- as.character(map$rclasses)
-  #get data
-  res <- dbGetQuery(con,query)
-  
-  i=1
-  for(i in 1:length(map$rclasses)) {
-    cvn <- call(map$rclasses[i],res[,map$Field[i]])
-    res[map$Field[i]] <- eval(cvn)
-  }
-  
-  return(res)
 }
 
 #+++++++++++++++++++++++++++START SCRIPT+++++++++++++++++++++++++++++++++#
@@ -103,9 +68,30 @@ train01 <-raw01
 
 #Some basic cleanup...
 train01$Operator <- NULL #Not interested in bus operator
-train01[train01=="null"]=NA#replace data "nulls" with NA's
 train01$TimeFrame <- as.character(train01$TimeFrame) #convert from factor to char
+#add quotes to date as required by MYSQL
+train01$TimeFrame <- paste("'", train01$TimeFrame, "'", sep="")
+
+#Change the factor to a character and then character to int, otherwise as.integer()
+#interprets the factor as the undlerlying int from the factor and not
+#the "face value" of the factor.
 train01$StopID <- as.integer(as.character(train01$StopID))
+
+#
+train01$JourneyPatternID <- as.character(train01$JourneyPatternID)
+train01$JourneyPatternID <- paste("'", train01$JourneyPatternID, "'", sep="")
+train01[train01=="null"]=0#replace data "nulls" with NA's
+train01[is.na(train01)]=0
+
+####################################################################################
+### Post Cleanup Status: 
+### 1. Both JourneyPatternID & StopID had NA's that were been replaced with 0.
+### 2. Congestion and AtStop data should be interpreted as boolean 0's and 1's.
+### 3. 0's in Delay should be interpreted as numeric 0.
+### 4. In general MYSQL cannot interpret factors and so must have either numeric,
+###    date or character as inputs.
+### 5. Character inputs generally must have single quotes around them going into MYSQL.
+####################################################################################
 
 # creating tables for bus data storage:
 
@@ -133,19 +119,24 @@ dbSendQuery(mydb, "
 
 #Check table exists
 dbListTables(mydb)
+
 #check columns look right
-dbGetQuery(mydb, "
-select * from information_schema.columns
-where table_schema = 'dublinbus'
-order by table_name,ordinal_position
-")
+#dbGetQuery(mydb, "
+#select * from information_schema.columns
+#where table_schema = 'dublinbus'
+#order by table_name,ordinal_position
+#")
+
 # Using paste to create a query, displying it and throwing it at MYSQL
-query <- paste("INSERT INTO table1 VALUES(",1,",", paste(train01[1,], collapse = ", "), ")")
-query
-dbGetQuery(mydb,query)
+for(i in 1:nrow(train01)){
+  query <- paste("INSERT INTO table1 VALUES(",i,",", paste(train01[i,], collapse = ", "), ")")
+  query
+  dbGetQuery(mydb,query)  
+}
+
 
 #Verifying output
-dbGetQuery(mydb,"SELECT * FROM table1;")
-#NB: Currently MYSQL is out
+temp <- dbGetQuery(mydb,"SELECT * FROM table2 limit 10;")
+dbGetQuery(mydb,"SELECT COUNT(*) FROM table2;")
 
 #Now let's loop through the full table and add all the data
