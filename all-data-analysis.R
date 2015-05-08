@@ -34,11 +34,6 @@ coordConvert <- function(lat1, long1, lat2, long2){
 
 #+++++++++++++++++++++++++++START SCRIPT+++++++++++++++++++++++++++++++++#
 
-#STEP 1: Import required data into an sql database
-
-#create list of file names
-csvFiles = list.files(pattern="*.csv")
-
 #Initialise DB connection
 #Use 1 if this is your first time setting up the databse.
 #Use 2 if you're reconnecting to the database
@@ -93,39 +88,8 @@ train01[is.na(train01)]=0
 ### 5. Character inputs generally must have single quotes around them going into MYSQL.
 ####################################################################################
 
-# creating tables for bus data storage:
-
-dbGetQuery(mydb, "DROP TABLE table1")
-
-dbSendQuery(mydb, "
-  CREATE TABLE Table1 (
-  TimestampID INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  Timestamp BIGINT UNSIGNED,
-  LineID SMALLINT UNSIGNED,
-  JourneyPatternID VARCHAR(8),
-  TimeFrame VARCHAR (15),
-  VehicleJourneyID INT UNSIGNED,
-  Congestion BOOL,
-  LonWGS84 NUMERIC(10,8),
-  LatWGS84 NUMERIC(10,8),
-  Delay INT,
-  BlockID INT UNSIGNED,
-  VehicleID INT UNSIGNED,
-  StopID INT UNSIGNED,
-  AtStop BOOL,
-  PRIMARY KEY (TimestampID)
-  );
-")
-
-#Check table exists
+#Check tables exist
 dbListTables(mydb)
-
-#check columns look right
-#dbGetQuery(mydb, "
-#select * from information_schema.columns
-#where table_schema = 'dublinbus'
-#order by table_name,ordinal_position
-#")
 
 # Using paste to create a query, displying it and throwing it at MYSQL
 for(i in 1:nrow(train01)){
@@ -133,7 +97,6 @@ for(i in 1:nrow(train01)){
   query
   dbGetQuery(mydb,query)  
 }
-
 
 #Verifying output
 temp <- dbGetQuery(mydb,"SELECT * FROM table2 limit 10;")
