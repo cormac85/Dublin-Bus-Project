@@ -183,85 +183,110 @@ mydb = dbConnect(MySQL(), user='root', password='qwort', host='localhost',dbname
 
 #Get the 67 data on day 1 with the data I require.
 lineID=67
-day = 1
 
-for(day in 1:31)
-query <- paste("SELECT Timestamp, VehicleJourneyID, LonWGS84,LatWGS84 FROM table",
-               day," WHERE LineID =", lineID, sep='')
+all.LineID.Data.Final <- data.frame(timestamp=integer(),
+                                    VehicleJourneyID=integer(), 
+                                    TowardsCentre=integer(),
+                                    DaySector=integer(),
+                                    AveSpeed=numeric(),
+                                    Day=integer(),
+                                    stringsAsFactors=FALSE) 
 
-lineID.Data <- dbGetQuery(mydb, query)
-
-#get the VehicleJourneyID's for the 67 on that day & number of the journeys.
-journey.names <- distinct(select(lineID.Data, VehicleJourneyID))
-num.journeys <- nrow(journey.names)
-
-
-# Use custom function to get the direction in which each bus is travelling.
-# Then update the lineID data with the directions.
-directions <- getDirections(lineID.Data)
-
-lineID.Data["TowardsCentre"] <- NA
-
-for(i in 1:num.journeys){
-  lineID.Data[lineID.Data$VehicleJourneyID == directions[i,1],]$TowardsCentre = directions[i,2]
+for(day in 1:31){
+  query <- paste("SELECT Timestamp, VehicleJourneyID, LonWGS84,LatWGS84 FROM table",
+                 day," WHERE LineID =", lineID, sep='')
+  
+  lineID.Data <- dbGetQuery(mydb, query)
+  
+  #get the VehicleJourneyID's for the 67 on that day & number of the journeys.
+  journey.names <- distinct(select(lineID.Data, VehicleJourneyID))
+  num.journeys <- nrow(journey.names)
+  
+  
+  # Use custom function to get the direction in which each bus is travelling.
+  # Then update the lineID data with the directions.
+  directions <- getDirections(lineID.Data)
+  
+  lineID.Data["TowardsCentre"] <- NA
+  
+  for(i in 1:num.journeys){
+    lineID.Data[lineID.Data$VehicleJourneyID == directions[i,1],]$TowardsCentre = directions[i,2]
+  }
+  
+  # Calculate the day section, first create column and convert timestamp to datetime
+  lineID.Data["DaySection"] <- NA
+  lineID.Data.Final = lineID.Data %>% rowwise() %>% mutate(DaySection = dtConvert(Timestamp))
+  lineID.Data$DaySection <- NULL
+  lineID.Data$TowardsCentre <- NULL
+  
+  # Now convert that to hour of the day and make integer
+  lineID.Data.Final$DaySection <- as.integer(strftime(lineID.Data.Final$DaySection, format="%H"))
+  
+  # Finally convert hour to day section using the following conversion:
+  # (0:5: = 1, 6:11=2, 12:5=3, 6:11=4)
+  lineID.Data.Final$DaySection <- getDaySection(lineID.Data.Final$DaySection)
+  
+  #calculate the average speed between each subsequent record for each journeyID
+  # This will be divided up into 4 steps
+  
+  # Step 1: Sort dataset by journey ID and then timestamp
+  lineID.Data.Final <- arrange(lineID.Data.Final, VehicleJourneyID, Timestamp)
+  
+  # Step 2: Get distance between each subsequent point
+  # Needs cleanup when one vehiclejourney transitions to the next
+  lineID.Data.Final <- getDistances(lineID.Data.Final)
+  
+  # Create new record variable, it's the index.
+  lineID.Data.Final["Record"] <- 1:nrow(lineID.Data.Final)
+  # Create empty vector to hold the references to the first chronological instance
+  # of a vehicle journey.
+  first.vehiclejourney.references <- vector()
+  
+  # Get the references and put them in this vector
+  for(i in 1:num.journeys){
+    first.vehiclejourney.references[i] <- lineID.Data.Final[lineID.Data.Final$VehicleJourneyID == journey.names[i,1],][[1,8]]
+  }
+  
+  
+  # Get list of where distance values are invalid, ie the first member of each set
+  temp <- sapply(lineID.Data.Final$Record, function(x){
+    if(is.element(x,first.vehiclejourney.references) )
+      x = T
+    else
+      x=F
+    }    
+  )
+  
+  # use list to set each invalid distance measurement to NA
+  lineID.Data.Final[temp,7] = NA
+  
+  # Step 3: Calculate the time difference between each step in our Final 
+  # dataset and divide into distance to get average speed.
+  lineID.Data.Final <- getAverageSpeeds(lineID.Data.Final)
+  
+  
+  #Step 4: Clean the Dataset a bit
+  lineID.Data.Final$LatWGS84 <- NULL
+  lineID.Data.Final$LonWGS84 <- NULL
+  lineID.Data.Final$Record <- NULL
+  
+  # this iteration's data to the full data frame
+  lineID.Data.Final["Day"] <- day
+  all.LineID.Data.Final <- rbind(all.LineID.Data.Final, lineID.Data.Final)
+  
 }
 
-# Calculate the day section, first create column and convert timestamp to datetime
-lineID.Data["DaySection"] <- NA
-lineID.Data.Final = lineID.Data %>% rowwise() %>% mutate(DaySection = dtConvert(Timestamp))
-lineID.Data$DaySection <- NULL
-lineID.Data$TowardsCentre <- NULL
+#Pre Processing
 
-# Now convert that to hour of the day and make integer
-lineID.Data.Final$DaySection <- as.integer(strftime(lineID.Data.Final$DaySection, format="%H"))
+#Remove NA's and NaN's
+all.LineID.Data.Final.noNA <- na.omit(all.LineID.Data.Final)
 
-# Finally convert hour to day section using the following conversion:
-# (0:5: = 1, 6:11=2, 12:5=3, 6:11=4)
-lineID.Data.Final$DaySection <- getDaySection(lineID.Data.Final$DaySection)
+#Create a median for each journey on each day.
+grouped.target.data <- group_by(all.LineID.Data.Final.noNA, Day, DaySection, TowardsCentre, VehicleJourneyID) 
+summaries <- summarise(grouped.target.data, medianSpeeds = median(AveSpeed), medianTime=median(Timestamp))
 
-#calculate the average speed between each subsequent record for each journeyID
-# This will be divided up into 4 steps
+# export the raw data and the summarised (medianed) data to a file.
+write.csv(all.LineID.Data.Final.noNA, file = "target.data.final.raw.csv")
+write.csv(summaries, file = "target.data.final.journeyMedians.csv")
 
-# Step 1: Sort dataset by journey ID and then timestamp
-lineID.Data.Final <- arrange(lineID.Data.Final, VehicleJourneyID, Timestamp)
-
-# Step 2: Get distance between each subsequent point
-# Needs cleanup when one vehiclejourney transitions to the next
-lineID.Data.Final <- getDistances(lineID.Data.Final)
-
-# Create new record variable, it's the index.
-lineID.Data.Final["Record"] <- 1:nrow(lineID.Data.Final)
-# Create empty vector to hold the references to the first chronological instance
-# of a vehicle journey.
-first.vehiclejourney.references <- vector()
-
-# Get the references and put them in this vector
-for(i in 1:num.journeys){
-  first.vehiclejourney.references[i] <- lineID.Data.Final[lineID.Data.Final$VehicleJourneyID == journey.names[i,1],][[1,8]]
-}
-
-
-# Get list of where distance values are invalid, ie the first member of each set
-temp <- sapply(lineID.Data.Final$Record, function(x){
-  if(is.element(x,first.vehiclejourney.references) )
-    x = T
-  else
-    x=F
-  }    
-)
-
-# use list to set each invalid distance measurement to NA
-lineID.Data.Final[temp,7] = NA
-
-# Step 3: Calculate the time difference between each step in our Final 
-# dataset and divide into distance to get average speed.
-lineID.Data.Final <- getAverageSpeeds(lineID.Data.Final)
-
-
-#Step 4: Clean the Dataset
-lineID.Data.Final.NoNA <- na.omit(lineID.Data.Final)
-lineID.Data.Final.NoNA$LatWGS84 <- NULL
-lineID.Data.Final.NoNA$LonWGS84 <- NULL
-
-#Scratchpad
-
+rm(test)  

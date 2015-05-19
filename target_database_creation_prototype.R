@@ -266,14 +266,24 @@ lineID.Data.Final <- getAverageSpeeds(lineID.Data.Final)
 lineID.Data.Final.NoNA <- na.omit(lineID.Data.Final)
 lineID.Data.Final.NoNA$LatWGS84 <- NULL
 lineID.Data.Final.NoNA$LonWGS84 <- NULL
+lineID.Data.Final$LatWGS84 <- NULL
+lineID.Data.Final$LonWGS84 <- NULL
 
 #Scratchpad
 
+library(ggplot2)
 
-# Clean up the workspace
-rm(lineID)
-rm(day)
-rm(query) 
-rm(journey.names)
-rm(num.journeys)
-rm(i)
+summary(lineID.Data.Final.NoNA)
+
+# Violin plot of day sections
+p <- ggplot(lineID.Data.Final.NoNA, aes(factor(DaySection), AveSpeed))
+p + geom_violin(aes(fill=factor(DaySection))) +
+  labs(x="Day Section (1-4)", y="Average Bus Speed",
+       title="Violin Plot of Average Speeds in Different Day Sections on 1st January") +
+  theme(plot.title=element_text(size=rel(1.8),face="bold"), 
+        axis.text=element_text(size=rel(1.2))) +
+  theme(axis.title=element_text(size=rel(1.3),face="bold"))+
+  theme(legend.position="none") +
+  geom_boxplot(width=0.1, outlier.colour = "blue", outlier.size = 3)
+
+  
