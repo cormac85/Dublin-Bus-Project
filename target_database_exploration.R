@@ -108,3 +108,5 @@ p + geom_violin(aes(fill=factor(Day))) +
   theme(legend.position="none")+
   geom_boxplot(width=0.3, outlier.colour = "blue", outlier.size = 3)
 
+write.csv(target.data.noOutliers.noLower, file="target.data.noOutliers.noLower.csv")
+write.csv(target.data.noOutliers, file="target.data.noOutliers.csv")
